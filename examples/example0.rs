@@ -1,4 +1,4 @@
-use args::{app, Argument, ArgumentType};
+use argue::{app, Argument, ArgumentType};
 
 /// HOW TO:
 ///
