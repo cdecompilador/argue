@@ -4,6 +4,13 @@ version = "0.1.0"
 authors = ["ElGusanitoPLAY <nyagouno@gmail.com>"]
 edition = "2018"
 
+description = "Argument parsing library for fun"
+repository = "https://github.com/cdecompilador/argue.git"
+
+readme = "README.md"
+keywords = ["argument", "argument-parsing"]
+license-file = "LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+
