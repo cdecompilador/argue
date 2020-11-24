@@ -11,7 +11,7 @@ fn main() {
         Argument::new(
             // The false is to say than the argument is not mandatory
             ArgumentType::Paired(false), 
-            &["-j", "-jthreads"], 
+            &["-j", "--jthreads"], 
             "Set the number of threads"
         ),
     ];

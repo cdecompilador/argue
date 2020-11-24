@@ -16,6 +16,10 @@ impl<'a> ArgParserBuilder<'a> {
                 arg_output: None,
 
                 received_arguments: vec![],
+                input: None,
+                expected_input: false,
+                output: None,
+                expected_output: false,
 
                 arg_count: 0,
             }
@@ -41,10 +45,17 @@ impl<'a> ArgParserBuilder<'a> {
         self
     }
 
-    /// Set the arg_output,
-    pub fn arg_output(mut self, arg: Argument<'a>) -> ArgParserBuilder {
+    /// Set if there will be output arg
+    pub fn output(mut self, is: bool) -> ArgParserBuilder<'a> {
         self.arg_parser.arg_count += 1;
-        self.arg_parser.arg_output = Some(arg);
+        self.arg_parser.expected_output = is;
+        self
+    }
+
+    /// Set if there will be input arg
+    pub fn input(mut self, is: bool) -> ArgParserBuilder<'a> {
+        self.arg_parser.arg_count += 1;
+        self.arg_parser.expected_input= is;
         self
     }
 
@@ -61,24 +72,45 @@ impl<'a> ArgParserBuilder<'a> {
             std::process::exit(0);
         }
         // Get the received arguments from the env and save them into arg_parser
-        let mut recv_args = std::env::args().into_iter().peekable();
+        let mut recv_args = std::env::args().into_iter();
+        recv_args.next(); // Skip the program name
         let mut recv_args_parsed = Vec::with_capacity(recv_args.len());
-        // TODO: Needs a lot of improvement
-        for arg in self.arg_parser.args.unwrap().iter() {
-            if let Some(a) = recv_args
-                .find(|a_str| { arg.names.contains(&a_str.as_str()) }) 
-            {
-                let value = match arg.arg_type {
-                    ArgumentType::Single(_) => None,
-                    // TODO: Discern between Paired and Equaled
-                    // FIXME: Possible error if invalid input
-                    _ => recv_args.next(), 
-                };
-                recv_args_parsed.push(ReceivedArgument {
-                    arg_type: arg.arg_type,
-                    key: a,
-                    value,
-                });
+        for expected_arg in self.arg_parser.args.unwrap_or_default().iter() {
+            while let Some(received_arg) = recv_args.next() {
+                // Case that the received argument is into the argument list
+                if expected_arg.names.contains(&received_arg.as_str()){
+                    let value = match expected_arg.arg_type {
+                        ArgumentType::Single(_) => None,
+                        // TODO: Discern between Paired and Equaled
+                        // FIXME: Possible error if invalid input
+                        _ => recv_args.next(), 
+                    };
+                    recv_args_parsed.push(ReceivedArgument {
+                        arg_type: expected_arg.arg_type,
+                        key: received_arg,
+                        value,
+                    });
+                // Case not, check if its input, output or none of them
+                } else {
+                    if self.arg_parser.expected_input 
+                        && self.arg_parser.input.is_none() {
+                        self.arg_parser.input = Some(received_arg.clone());
+                    } else if self.arg_parser.expected_output 
+                        && self.arg_parser.output.is_none() {
+                        self.arg_parser.output = Some(received_arg.clone());
+                    } else {
+                        // TODO: handle error
+                    }
+                }
+            }
+        }
+        // Case no arguments but yes input/output
+        if self.arg_parser.args.iter().count() == 0 {
+            if self.arg_parser.expected_input {
+                self.arg_parser.input = recv_args.nth(0);
+            }
+            if self.arg_parser.expected_output { 
+                self.arg_parser.output = recv_args.nth(1);
             }
         }
         self.arg_parser.received_arguments = recv_args_parsed;
@@ -95,14 +127,24 @@ pub fn app(app_name: &str) -> ArgParserBuilder {
 /// Contains all the data and arguments of the project
 #[derive(Debug)]
 pub struct ArgParser<'a> {
-    description: Option<&'a str>, // Description of the proj
-    version: Option<&'a str>,     // Version of the proj, to be printed with -v
-    app_name: Option<&'a str>,    // The name of the proj
-
-    args: Option<&'a[Argument<'a>]>,  // The arguments
-    arg_output: Option<Argument<'a>>, // The output
+    /// Description of the proj
+    description: Option<&'a str>, 
+    /// Version of the proj, to be printed with -v
+    version: Option<&'a str>,     
+    /// The name of the proj
+    app_name: Option<&'a str>,    
+    /// The arguments
+    args: Option<&'a[Argument<'a>]>,  
+    /// The output
+    arg_output: Option<Argument<'a>>, 
 
     arg_count: usize,
+    /// The first non matchig arg
+    input: Option<String>,  
+    expected_input: bool,
+    /// The second    ... 
+    output: Option<String>, 
+    expected_output: bool,
 
     received_arguments: Vec<ReceivedArgument>,
 }
@@ -144,6 +186,16 @@ impl<'a> ArgParser<'a> {
         self.received_arguments.iter()
             .find(|&a| keys.contains(&a.key.as_str()))?.value.clone()
     }
+
+    /// Retrieve the `input` argument if avaible
+    pub fn get_input(&self) -> Option<String> {
+        self.input.clone()
+    }
+
+    /// Retrieve the `input` argument if avaible
+    pub fn get_output(&self) -> Option<String> {
+        self.output.clone()
+    }
 }
 
 /// Defines the type of argument passed, a Single argument can be "--help", a 
@@ -152,17 +204,23 @@ impl<'a> ArgParser<'a> {
 /// It will print the usage and the missing argument 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ArgumentType {
-    Single(bool), // like "--help"
-    Paired(bool), // like "-j N"
-    Equaled(bool), // like "--example example0"
+    /// like "--help"
+    Single(bool), 
+    /// like "-j N"
+    Paired(bool), 
+    /// like "--example example0"
+    Equaled(bool), 
 }
 
 /// The representation of an Argument passed to the argument parser
 #[derive(Debug)]
 pub struct Argument<'a> {
-    arg_type: ArgumentType, // The type of argument
-    names: &'a[&'a str],    // The possible names that matches the argument
-    description: &'a str,   // The description of the argument
+    /// The type of argument
+    arg_type: ArgumentType, 
+    /// The possible names that matches the argument
+    names: &'a[&'a str],    
+    /// The description of the argument
+    description: &'a str,  
 }
 
 /// Received argument
