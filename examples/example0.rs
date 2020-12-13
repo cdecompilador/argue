@@ -10,10 +10,15 @@ fn main() {
     let arguments = &[
         Argument::new(
             // The false is to say than the argument is not mandatory
-            ArgumentType::Paired(false), 
+            ArgumentType::Paired(true), 
             &["-j", "--jthreads"], 
             "Set the number of threads"
         ),
+        Argument::new(
+            ArgumentType::Single(false),
+            &["-M", "-Mayus"],
+            "Print the message in Upper"
+        )
     ];
     
     // Ez to understand i think, pretty close to clap
@@ -26,5 +31,9 @@ fn main() {
     // Get an argument equaled, also work even if -jthreads is passed through
     // the cli
     let n = arg_parser.get("-j").unwrap();
-    println!("Number of cores: {}", n);
+    if arg_parser.is_there("-M") {
+        println!("NUMBER OF CORES: {}", n);
+    } else {
+        println!("Number of cores: {}", n);
+    }
 }

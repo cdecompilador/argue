@@ -1,3 +1,5 @@
+#![feature(str_split_once)]
+
 /// Struct used to create a `ArgParser` with the builder pattern
 pub struct ArgParserBuilder<'a> {
     arg_parser: ArgParser<'a>,
@@ -46,6 +48,7 @@ impl<'a> ArgParserBuilder<'a> {
     }
 
     /// Set if there will be output arg
+    /// TODO: Still not work
     pub fn output(mut self, is: bool) -> ArgParserBuilder<'a> {
         self.arg_parser.arg_count += 1;
         self.arg_parser.expected_output = is;
@@ -53,6 +56,7 @@ impl<'a> ArgParserBuilder<'a> {
     }
 
     /// Set if there will be input arg
+    /// TODO: Still not work
     pub fn input(mut self, is: bool) -> ArgParserBuilder<'a> {
         self.arg_parser.arg_count += 1;
         self.arg_parser.expected_input= is;
@@ -74,49 +78,166 @@ impl<'a> ArgParserBuilder<'a> {
         // Get the received arguments from the env and save them into arg_parser
         let mut recv_args = std::env::args().into_iter();
         recv_args.next(); // Skip the program name
-        let mut recv_args_parsed = Vec::with_capacity(recv_args.len());
-        for expected_arg in self.arg_parser.args.unwrap_or_default().iter() {
-            while let Some(received_arg) = recv_args.next() {
-                // Case that the received argument is into the argument list
-                if expected_arg.names.contains(&received_arg.as_str()){
-                    let value = match expected_arg.arg_type {
-                        ArgumentType::Single(_) => None,
-                        // TODO: Discern between Paired and Equaled
-                        // FIXME: Possible error if invalid input
-                        _ => recv_args.next(), 
-                    };
-                    recv_args_parsed.push(ReceivedArgument {
-                        arg_type: expected_arg.arg_type,
-                        key: received_arg,
-                        value,
-                    });
-                // Case not, check if its input, output or none of them
-                } else {
-                    if self.arg_parser.expected_input 
-                        && self.arg_parser.input.is_none() {
-                        self.arg_parser.input = Some(received_arg.clone());
-                    } else if self.arg_parser.expected_output 
-                        && self.arg_parser.output.is_none() {
-                        self.arg_parser.output = Some(received_arg.clone());
-                    } else {
-                        // TODO: handle error
+        let recv_args = recv_args.collect();
+        let possible_args = self.parse_arguments(recv_args);
+
+        // Check the possible arguments and push them into the received 
+        // arguments if match with the expected ones, just bruteforce it!
+        for possible_argument in possible_args.iter() {
+            for expected_arg in self.arg_parser.args.unwrap() {
+                match possible_argument {
+                    PossibleArgument::Single(v) => {
+                        if let ArgumentType::Single(r) = expected_arg.arg_type {
+                            if expected_arg.names.iter().any(|n| n == v) {
+                                let received_argument = ReceivedArgument {
+                                    arg_type: ArgumentType::Single(r),
+                                    key: v.clone(),
+                                    value: None,
+                                };
+                                self.arg_parser
+                                    .received_arguments.push(received_argument);
+                            }
+                        }
+                    }
+                    PossibleArgument::Paired((k, v)) => {
+                        if let ArgumentType::Paired(r) = expected_arg.arg_type {
+                            if expected_arg.names.iter().any(|n| n == k) {
+                                let received_argument = ReceivedArgument {
+                                    arg_type: ArgumentType::Paired(r),
+                                    key: k.clone(),
+                                    value: Some(v.clone()),
+                                };
+                                self.arg_parser
+                                    .received_arguments.push(received_argument);
+                            } 
+                        }
+                    }
+                    PossibleArgument::Equaled((k, v)) => {
+                        if let ArgumentType::Equaled(r) = expected_arg.arg_type {
+                            if expected_arg.names.iter().any(|n| n == v) {
+                                let received_argument = ReceivedArgument {
+                                    arg_type: ArgumentType::Equaled(r),
+                                    key: k.clone(),
+                                    value: Some(v.clone()),
+                                };
+                                self.arg_parser
+                                    .received_arguments.push(received_argument);
+                            } 
+                        }
                     }
                 }
             }
         }
-        // Case no arguments but yes input/output
-        if self.arg_parser.args.iter().count() == 0 {
-            if self.arg_parser.expected_input {
-                self.arg_parser.input = recv_args.nth(0);
-            }
-            if self.arg_parser.expected_output { 
-                self.arg_parser.output = recv_args.nth(1);
-            }
+
+        // Check for the obligatory arguemnts
+        if let Some(args) = self.arg_parser.args {
+            let mut obligated_args = args.iter().filter(|&a| {
+                match a.arg_type {
+                    ArgumentType::Single(true) 
+                    | ArgumentType::Paired(true) 
+                    | ArgumentType::Equaled(true) => true,
+                    _ => false,
+                }
+            });
+            // Check if inside the obligated args all of them match at least 
+            // with one of the received arguments
+            if !obligated_args.all(|oblig_a| {
+                self.arg_parser.received_arguments.iter().any(|a| {
+                    oblig_a.names.iter().any(|&n| n == a.key)
+                })
+            }) {
+                // TODO: Print exactly which was the error
+
+                println!("Invalid arguments passed\n");
+                self.arg_parser.print_help();
+                std::process::exit(0);
+            } 
         }
-        self.arg_parser.received_arguments = recv_args_parsed;
+
+        // Return the arg_parser built
         self.arg_parser
     }
 
+    fn parse_arguments(&self, recv_args: Vec<String>) 
+        ->  Vec<PossibleArgument> {
+        // Create the containers for the possible arguments
+        // TODO: Maybe use crayon or futures for better efficiency but I don't
+        // think this loops can be a problem
+        // TODO: OMG TOO MANY STRING INSTANTIATIONS
+        let mut single_arguments: Vec<String> = Vec::new();
+        let mut paired_arguments: Vec<(String, String)> = Vec::new();
+        let mut equaled_arguments: Vec<(String, String)> = Vec::new();
+
+        // Single arguments loop, every pushed argument is reinstantiated
+        for arg in &recv_args {
+            if arg.starts_with("-") || arg.starts_with("--") {
+                if arg.contains('=') {
+                    continue;
+                } else {
+                    single_arguments.push(arg.clone());
+                }
+            }
+        }
+
+        // Paired arguments loop, every pushed argument is reinstantiated
+        for (i, arg) in recv_args.iter().enumerate() {
+            if arg.starts_with("-") || arg.starts_with("--") {
+                if arg.contains('=') {
+                    continue;
+                } else {
+                    if i != recv_args.len()-1 {
+                        let second_one = recv_args[i + 1].clone();
+                        if second_one.starts_with("-") 
+                            || second_one.starts_with("--")
+                            || second_one.contains("=") 
+                        {
+                            continue;
+                        } else {
+                            paired_arguments.push((arg.clone(), second_one));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Equaled arguments loop, every pushed argument is reinstantiated
+        for arg in &recv_args {
+            if arg.starts_with("-") || arg.starts_with("--") {
+                if arg.contains('=') {
+                    arg.split_once('=').into_iter().for_each(|(x,y)| { 
+                        equaled_arguments.push((x.to_owned(),y.to_owned())); 
+                    });
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        // Transform the Vec<String> to Vec<PossibleArgument>, reallocating
+        // the strings >:c
+        let single_arguments: Vec<PossibleArgument> = single_arguments
+            .iter()
+            .map(|arg_name| {
+                PossibleArgument::Single(arg_name.clone())
+        }).collect();
+        let paired_arguments: Vec<PossibleArgument> = paired_arguments
+            .iter()
+            .map(|(key, value)| {
+                PossibleArgument::Paired((key.clone(), value.clone()))
+        }).collect();
+        let equaled_arguments: Vec<PossibleArgument> = equaled_arguments
+            .iter()
+            .map(|(key, value)| {
+                PossibleArgument::Equaled((key.clone(), value.clone()))
+        }).collect();
+
+        // Well I think here there is no reallocation
+        let mut possible_args = Vec::with_capacity(10);
+        possible_args.extend(single_arguments);
+        possible_args.extend(paired_arguments);
+        possible_args.extend(equaled_arguments);
+        possible_args
+    }
 }
 
 /// Like the ArgParserBuilder::new but more accesible
@@ -196,6 +317,23 @@ impl<'a> ArgParser<'a> {
     pub fn get_output(&self) -> Option<String> {
         self.output.clone()
     }
+
+    /// Check if the name argument its inside the received arguments
+    pub fn is_there(&self, name: &str) -> bool {
+        if let Some(args) = self.args {
+            if let Some(names) = args.iter()
+                .find(|a| a.names.iter().any(|&n| n == name)) {
+                let names = names.names;
+                if self.received_arguments.iter().any(|a| {
+                    let recv_name = a.key.as_str();
+                    names.contains(&recv_name) 
+                }) {
+                    return true;
+                } 
+            } 
+        }
+        false
+    }
 }
 
 /// Defines the type of argument passed, a Single argument can be "--help", a 
@@ -238,4 +376,13 @@ impl<'a> Argument<'a> {
             arg_type, names, description
         }
     }
+}
+
+/// The PossibleArgument is used as part of the brute force to match arguments
+/// FIXME: Maybe would be better to use &String instead of owned ones
+#[derive(Debug, Clone)]
+enum PossibleArgument {
+    Single(String),
+    Paired((String, String)),
+    Equaled((String, String)),
 }
